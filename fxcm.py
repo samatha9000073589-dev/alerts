@@ -3,6 +3,12 @@ import time
 import threading
 from datetime import datetime, timezone
 
+try:
+    import requests as _requests
+    _REQUESTS_AVAILABLE = True
+except ImportError:
+    _REQUESTS_AVAILABLE = False
+
 os.environ["LD_LIBRARY_PATH"] = "/app/forexconnect/lib"
 
 try:
@@ -80,6 +86,78 @@ COMMON_COMMODITIES = [
 FXCM_SYMBOL_MAP = {
     "US100": "NAS100",
 }
+
+
+# ==================================================
+# YAHOO FINANCE FALLBACK FOR INDICES
+#
+# FXCM demo accounts throttle index tick rates heavily
+# (NAS100 may not update for minutes at a time).
+# Yahoo Finance futures prices are used for index symbols
+# instead, giving live data for all account types.
+# ==================================================
+
+YAHOO_INDEX_MAP = {
+    "NAS100": "NQ=F",   # CME Nasdaq-100 E-mini futures
+    "SPX500": "ES=F",   # CME S&P 500 E-mini futures
+    "US30":   "YM=F",   # CME Dow Jones E-mini futures
+    "GER30":  "FDAX=F", # Eurex DAX futures
+    "UK100":  "Z=F",    # ICE FTSE 100 futures
+}
+
+TYPICAL_INDEX_SPREAD = {
+    "NAS100": 2.0,
+    "SPX500": 0.5,
+    "US30":   2.0,
+    "GER30":  1.5,
+    "UK100":  1.0,
+}
+
+
+def _get_yahoo_index_price(symbol):
+    """
+    Fetch the current price for an index via Yahoo Finance.
+    Returns a dict with bid/ask estimated from the mid-price and typical spread,
+    or None if Yahoo Finance is unavailable.
+    """
+
+    if not _REQUESTS_AVAILABLE:
+        return None
+
+    yahoo_sym = YAHOO_INDEX_MAP.get(symbol)
+    if not yahoo_sym:
+        return None
+
+    url = (
+        "https://query2.finance.yahoo.com"
+        f"/v8/finance/chart/{yahoo_sym}"
+    )
+
+    resp = _requests.get(
+        url,
+        params={"interval": "1m", "range": "1d"},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=8,
+    )
+
+    resp.raise_for_status()
+
+    meta = resp.json()["chart"]["result"][0]["meta"]
+
+    price = float(meta["regularMarketPrice"])
+
+    if price <= 0:
+        raise ValueError(
+            f"Yahoo returned invalid price for {symbol}: {price}"
+        )
+
+    spread = TYPICAL_INDEX_SPREAD.get(symbol, price * 0.0001)
+
+    return {
+        "symbol": symbol,
+        "bid": round(price - spread / 2, 2),
+        "ask": round(price + spread / 2, 2),
+    }
 
 
 # ==================================================
@@ -512,15 +590,12 @@ def reconnect_fxcm(reason="unknown"):
 
 def _read_offer(fx, symbol):
 
-    # get_table_reader forces a fresh pull from the FXCM server via
-    # get_table_refresh_response, so indices like NAS100 return the
-    # current price rather than a stale streaming-table snapshot.
-    reader = fx.get_table_reader(
+    offers = fx.get_table(
         fxcorepy.O2GTableType.OFFERS
     )
 
 
-    for row in reader:
+    for row in offers:
 
         fx_symbol = (
             row.instrument
@@ -648,6 +723,52 @@ def get_price(symbol):
     symbol = normalize_symbol(
         symbol
     )
+
+
+    # --------------------------------------------------
+    # INDICES: use Yahoo Finance futures prices.
+    #
+    # FXCM demo accounts do not push live index ticks —
+    # the OFFERS table shows the same price for minutes.
+    # Yahoo Finance (NQ=F, ES=F, …) gives real-time data.
+    # --------------------------------------------------
+
+    if symbol in YAHOO_INDEX_MAP:
+
+        try:
+
+            data = _get_yahoo_index_price(symbol)
+
+            if data is not None:
+
+                bid = data["bid"]
+                ask = data["ask"]
+
+                health = _update_quote_health(
+                    symbol, bid, ask
+                )
+
+                _record_activity()
+
+                return {
+                    "symbol": data["symbol"],
+                    "bid": bid,
+                    "ask": ask,
+                    "quote_age": round(
+                        health["age"], 1
+                    ),
+                    "quote_changed": health["changed"],
+                    "stale": False,
+                }
+
+        except Exception as _yf_err:
+
+            print(
+                f"Yahoo index price failed for "
+                f"{original_symbol}: {_yf_err} — "
+                f"falling back to FXCM",
+                flush=True,
+            )
 
 
     # Allow one reconnect / retry.
