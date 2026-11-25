@@ -3,12 +3,14 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
+import sys
 import asyncio
 
 from dotenv import load_dotenv
 load_dotenv()
 
 
+import telegram
 from telegram import (
     ReplyKeyboardMarkup,
     InlineKeyboardMarkup,
@@ -2295,9 +2297,21 @@ def main():
 
 
 
+    # Exit when another instance is already polling so Railway restarts cleanly.
+    async def _conflict_error_handler(update, context):
+        if isinstance(context.error, telegram.error.Conflict):
+            print(
+                "\u274c Conflict: another bot instance is running. Exiting.",
+                flush=True,
+            )
+            sys.exit(1)
+        print(f"Bot error: {context.error}", flush=True)
+
+    app.add_error_handler(_conflict_error_handler)
+
     app.run_polling(
 
-        drop_pending_updates=False,
+        drop_pending_updates=True,
 
         allowed_updates=Update.ALL_TYPES
 
