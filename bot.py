@@ -1574,13 +1574,14 @@ Choose an option:
 
            context.user_data["waiting_for_pushover_key"] = True
 
-
            await update.message.reply_text(
-
-              "🔑 Enter your Pushover User Key:\n\n"
-              "Paste the key here."
-
-         )
+               "🔑 Enter your Pushover User Key:\n\n"
+               "Paste the key here.",
+               reply_markup=ReplyKeyboardMarkup(
+                   [["⬅️ Back"]],
+                   resize_keyboard=True,
+               )
+           )
 
 
 
