@@ -157,9 +157,9 @@ main_menu = [
 
     ["📈 Add Alert", "📋 My Alerts"],
 
-    ["⭐ Favorites", "🗑 Remove Alert"],
+    ["⭐ Favorites", "🔔 Notification Settings"],
 
-    ["🔔 Notification Settings", "ℹ️ Status"],
+    ["ℹ️ Status"],
 
 ]
 
@@ -1298,154 +1298,35 @@ async def menu_handler(
 
     elif text == "📋 My Alerts":
 
-
         alerts = get_user_alerts(user_id)
 
-
-
         if not alerts:
-
-
-            await update.message.reply_text(
-
-                "📋 No active alerts."
-
-            )
-
+            await update.message.reply_text("📋 No active alerts.")
             return
 
-
-
-
-
-
-        msg = (
-
-            "📋 Your Active Alerts:\n\n"
-
-        )
-
-
-
+        msg = "📋 Your Active Alerts\n\nTap an alert to select it, then press Delete.\n\n"
         for alert in alerts:
-
-
-            msg += (
-
-                f"🆔 ID: {alert[0]}\n"
-                f"📊 Symbol: {alert[2]}\n"
-                f"🎯 Target: {alert[3]}\n"
-                f"📈 Direction: {alert[4]}\n\n"
-
-            )
-
-
-
-
-
-        await update.message.reply_text(
-
-            msg
-
-        )
-
-
-
-
-
-
-
-
-
-# ==================================================
-# REMOVE ALERT
-# ==================================================
-
-
-    elif text == "🗑 Remove Alert":
-
-
-        alerts = get_user_alerts(user_id)
-
-
-
-        if not alerts:
-
-
-            await update.message.reply_text(
-
-                "📋 No active alerts."
-
-            )
-
-            return
-
-
-
-
+            msg += f"📊 {alert[2]}  |  🎯 {format_market_price(alert[2], float(alert[3]))}  |  {alert[4]}\n"
 
         buttons = []
-
-
-
         for alert in alerts:
-
-
-            buttons.append(
-
-                [
-
-                    InlineKeyboardButton(
-
-                        f"{alert[2]} | {alert[3]}",
-
-                        callback_data=f"toggle_{alert[0]}"
-
-                    )
-
-                ]
-
-            )
-
-
-
-
-        buttons.append(
-
-            [
-
+            buttons.append([
                 InlineKeyboardButton(
-
-                    "🗑 Delete Selected",
-
-                    callback_data="delete_selected"
-
+                    f"\u2610 {alert[2]}  {format_market_price(alert[2], float(alert[3]))}  {alert[4]}",
+                    callback_data=f"toggle_{alert[0]}"
                 )
-
-            ]
-
-        )
-
-
+            ])
+        buttons.append([
+            InlineKeyboardButton("\U0001f5d1 Delete Selected", callback_data="delete_selected")
+        ])
 
         context.user_data["delete_list"] = []
 
-
-
-
         await update.message.reply_text(
-
-            "🗑 Select alerts to remove:\n\n"
-            "Tap alerts to select\n"
-            "Then press Delete Selected",
-
-            reply_markup=InlineKeyboardMarkup(
-
-                buttons
-
-            )
-
+            msg,
+            reply_markup=InlineKeyboardMarkup(buttons)
         )
+
 
 
 
