@@ -512,12 +512,15 @@ def reconnect_fxcm(reason="unknown"):
 
 def _read_offer(fx, symbol):
 
-    offers = fx.get_table(
+    # get_table_reader forces a fresh pull from the FXCM server via
+    # get_table_refresh_response, so indices like NAS100 return the
+    # current price rather than a stale streaming-table snapshot.
+    reader = fx.get_table_reader(
         fxcorepy.O2GTableType.OFFERS
     )
 
 
-    for row in offers:
+    for row in reader:
 
         fx_symbol = (
             row.instrument
