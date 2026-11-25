@@ -584,6 +584,16 @@ async def menu_handler(
 
     if context.user_data.get("waiting_for_pushover_key"):
 
+        if text == "⬅️ Back":
+            context.user_data.pop("waiting_for_pushover_key", None)
+            status = get_pushover_status(user_id)
+            keyboard = notification_menu_connected if status == 1 else notification_menu_disabled
+            await update.message.reply_text(
+                "🔔 Notification Settings",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+            return
+
         key = text.strip()
 
 
