@@ -211,47 +211,100 @@ def normalize_symbol(symbol):
 
 def forex_market_should_be_active():
     """
-    Used only for stale-price detection.
+    Used only for stale-price detection (forex / default).
 
-    Monday-Thursday:
-        active
-
-    Friday:
-        active until approximately 22:00 UTC
-
-    Saturday:
-        inactive
-
-    Sunday:
-        active after approximately 22:00 UTC
-
-    This prevents the bot from repeatedly reconnecting
-    simply because markets are closed for the weekend.
+    Monday-Thursday: always active.
+    Friday: active until ~22:00 UTC.
+    Saturday: inactive.
+    Sunday: active after ~22:00 UTC.
     """
 
-    now = datetime.now(timezone.utc)
-
+    now     = datetime.now(timezone.utc)
     weekday = now.weekday()
-    hour = now.hour
-
-    # Monday = 0
-    # Tuesday = 1
-    # Wednesday = 2
-    # Thursday = 3
-    # Friday = 4
-    # Saturday = 5
-    # Sunday = 6
+    hour    = now.hour
 
     if weekday in (0, 1, 2, 3):
         return True
-
     if weekday == 4:
         return hour < 22
-
     if weekday == 6:
         return hour >= 22
-
     return False
+
+
+def _in_window(hm, open_min, close_min):
+    """
+    Return True if hm (hour*60+minute) is inside [open_min, close_min).
+    Handles overnight windows where close_min < open_min.
+    """
+    if open_min <= close_min:
+        return open_min <= hm < close_min
+    # Overnight window (e.g. 22:00 → 01:00 next day)
+    return hm >= open_min or hm < close_min
+
+
+# Exchange hours in UTC: (open_h, open_m, close_h, close_m)
+# Used ONLY for stale-price detection — avoids reconnects when
+# an exchange is legitimately closed.
+_EXCHANGE_HOURS = {
+    ".JP":  (0,  0,  6, 30),   # Tokyo Stock Exchange
+    ".HK":  (1, 30,  8,  0),   # Hong Kong Stock Exchange
+    ".US":  (14, 30, 21,  0),  # NYSE / NASDAQ
+    ".CA":  (14, 30, 21,  0),  # Toronto Stock Exchange
+    ".EXT": (10,  0,  1,  0),  # US extended hours (overnight window)
+    ".DE":  (7,   0, 15, 30),  # Deutsche Börse / XETRA
+    ".FR":  (7,   0, 15, 30),  # Euronext Paris
+    ".NL":  (7,   0, 15, 30),  # Euronext Amsterdam
+    ".UK":  (8,   0, 16, 30),  # London Stock Exchange
+}
+
+# Thematic baskets that follow US stock hours
+_US_HOURS_BASKETS = frozenset({
+    "AIRLINES", "BIOTECH", "CANNABIS", "CASINOS",
+    "CRYPTOSTOCK", "ESPORTS", "FAANG", "MAG7.24H",
+    "TRAVEL", "URANIUM", "WFH",
+    "US.AUTO", "US.BANKS", "US.ECOMM",
+    "CHN.ECOMM", "CHN.TECH",
+})
+
+
+def market_should_be_active(symbol):
+    """
+    Returns True when the exchange for this symbol is expected to be open.
+    Used only for stale-price detection — prevents false reconnects when
+    an exchange is legitimately closed overnight or on weekends.
+    """
+
+    now     = datetime.now(timezone.utc)
+    weekday = now.weekday()   # 0=Mon … 6=Sun
+    hm      = now.hour * 60 + now.minute
+
+    # Weekends: all stock exchanges closed
+    if weekday == 5:          # Saturday
+        # Only forex / crypto are active over the weekend
+        pass                  # fall through to suffix / forex check
+    if weekday == 6 and symbol.endswith(
+        (".JP", ".HK", ".US", ".CA", ".EXT", ".DE", ".FR", ".NL", ".UK")
+    ):
+        return False
+
+    # Per-exchange suffix check
+    for suffix, (oh, om, ch, cm) in _EXCHANGE_HOURS.items():
+        if symbol.endswith(suffix):
+            if weekday == 5:  # Saturday — all stock exchanges closed
+                return False
+            open_min  = oh * 60 + om
+            close_min = ch * 60 + cm
+            return _in_window(hm, open_min, close_min)
+
+    # US-hours thematic baskets
+    if symbol in _US_HOURS_BASKETS:
+        if weekday in (5, 6):
+            return False
+        return _in_window(hm, 870, 1260)   # 14:30 – 21:00 UTC
+
+    # Default: forex market hours
+    return forex_market_should_be_active()
 
 
 # ==================================================
@@ -695,7 +748,7 @@ def _update_quote_health(
 
 
     stale = (
-        forex_market_should_be_active()
+        market_should_be_active(symbol)
         and age >= STALE_PRICE_SECONDS
     )
 
